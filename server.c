@@ -1,5 +1,5 @@
 /* include udpserv1 */
-#include "unpifi.h"
+#include "unpifiplus.h"
 
 void	mydg_echo(int);
 
@@ -68,7 +68,9 @@ int main(int argc, char **argv)
 		intf_info[noofintf].sock_fd = sockfd;
 		intf_info[noofintf].ipaddress = sa->sin_addr.s_addr;
 		
-		intf_info[noofintf].network_mask = 0;
+		sa = (struct sockaddr_in *) ifi->ifi_ntmaddr;
+		intf_info[noofintf].network_mask = sa->sin_addr.s_addr;
+		
 		intf_info[noofintf].subnet_address = 0;
 		
 		noofintf = noofintf+1;
@@ -76,7 +78,7 @@ int main(int argc, char **argv)
 	noofintf = noofintf-1;
 	/*
 	char str[128];
-	inet_ntop(AF_INET, &(intf_info[1].ipaddress), str, INET_ADDRSTRLEN);
+	inet_ntop(AF_INET, &(intf_info[1].network_mask), str, INET_ADDRSTRLEN);
 	printf("Ip address is %s\n", str);
 	*/
 	
