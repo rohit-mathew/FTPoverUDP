@@ -1,4 +1,4 @@
-PROGS =	server
+PROGS =	server client
 
 CC = gcc 
 
@@ -17,6 +17,12 @@ server: server.o
 
 server.o: server.c
 	${CC} ${CFLAGS} -c server.c
+	
+client: client.o 
+	${CC} ${CFLAGS} -o $@ client.o ${LIBS}
+
+client.o: client.c
+	${CC} ${CFLAGS} -c client.c
 clean:
 	rm -f ${PROGS} 
 	rm -f *~
