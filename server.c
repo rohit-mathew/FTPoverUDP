@@ -111,7 +111,7 @@ int main(int argc, char **argv)
 		sa = (struct sockaddr_in *) ifi->ifi_ntmaddr;
 		intf_info[noofintf].networkmask = sa->sin_addr.s_addr;
 		
-		intf_info[noofintf].subnetaddress = 0;
+		intf_info[noofintf].subnetaddress = intf_info[noofintf].networkmask&intf_info[noofintf].ipaddress;
 		
 		noofintf = noofintf+1;
 	}
