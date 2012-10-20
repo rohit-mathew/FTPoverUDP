@@ -40,10 +40,18 @@ void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, sockle
 	inet_pton(AF_INET, Sock_ntop_host(pcliaddr, sizeof(*pcliaddr)), &(cliaddr.sin_addr));
 	cliaddr.sin_port = ((struct sockaddr_in*)pcliaddr)->sin_port;
 	
+	inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	printf("\nChild Server %d: IPserver is %s\n", getpid(), str);
 	inet_ntop(AF_INET, &(cliaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nChild Server %d: IP Address of the connected client is \t%s\n", getpid(), str);
-	printf("\nChild Server %d: Port Number of the connected client is \t%d\n", getpid(), cliaddr.sin_port);
+	printf("\nChild Server %d: IP Address of the connected client is %s\n", getpid(), str);
+	printf("\nChild Server %d: Port Number of the connected client is %d\n", getpid(), cliaddr.sin_port);
 	sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
+	
+	//Code to check if the client is local or not
+	if((cliaddr.sin_addr.s_addr&this_socket.networkmask) == this_socket.subnetaddress)
+		printf("\nThe client and the server are local\n");
+	else
+		printf("\nThe client and the server are not local\n");
 	
 	for ( ; ; ) 
 	{
