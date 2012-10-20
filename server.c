@@ -18,16 +18,16 @@ void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, sockle
 	int n, i = 0;
 	char mesg[MAXLINE];
 	char str[INET_ADDRSTRLEN];
-	struct sockaddr_in myaddr;
+	struct sockaddr_in myaddr, cliaddr;
 	socklen_t	len;
 	
 	//Code to close all the sockets except this_socket.sockfd
-	printf("\nChild %d: Closing all sockets except current socket: %d\n", getpid(), this_socket.sockfd);
+	printf("\nChild Server %d: Closing all sockets except current socket: %d\n", getpid(), this_socket.sockfd);
 	for(i=0 ; i<=noofintf ; i++)
 	{
 		if(this_socket.sockfd == intf_info[i].sockfd)
 			continue;
-		printf("\nChild %d: Closing socket: %d\n", getpid(), intf_info[i].sockfd);
+		printf("\nChild Server %d: Closing socket: %d\n", getpid(), intf_info[i].sockfd);
 		close(intf_info[i].sockfd);
 	}
 	
@@ -35,13 +35,20 @@ void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, sockle
 	
 	//inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	//printf("\nIP Address is \t%s\n", str);
+	len = clilen;
+	n = recvfrom(this_socket.sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
+	inet_pton(AF_INET, Sock_ntop_host(pcliaddr, sizeof(*pcliaddr)), &(cliaddr.sin_addr));
+	cliaddr.sin_port = ((struct sockaddr_in*)pcliaddr)->sin_port;
+	
+	inet_ntop(AF_INET, &(cliaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	printf("\nChild Server %d: IP Address of the connected client is \t%s\n", getpid(), str);
+	printf("\nChild Server %d: Port Number of the connected client is \t%d\n", getpid(), cliaddr.sin_port);
+	sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
 	
 	for ( ; ; ) 
 	{
 		len = clilen;
 		n = recvfrom(this_socket.sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
-		//printf("child %d, datagram from %s", getpid(), Sock_ntop(pcliaddr, len));
-		//printf(", to %s\n", Sock_ntop(myaddr, len));
 		sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
 	}
 }
