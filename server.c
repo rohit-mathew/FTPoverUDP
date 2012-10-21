@@ -1,4 +1,3 @@
-/* include udpserv1 */
 #include "unpifiplus.h"
 
 
@@ -14,24 +13,29 @@ struct socket_info intf_info[32];
 
 void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, socklen_t clilen, int noofintf)
 {
-	printf("\nChild %d: Reached mydg_echo\n", getpid());
+	pid_t mypid;
+	mypid = getpid();
+	printf("\nChild %d: Reached mydg_echo\n", mypid);
 	int n, i = 0;
+	int connfd;
 	char mesg[MAXLINE];
 	char str[INET_ADDRSTRLEN];
 	struct sockaddr_in myaddr, cliaddr;
 	socklen_t	len;
+	int sa_len = sizeof(myaddr);
 	
 	//Code to close all the sockets except this_socket.sockfd
-	printf("\nChild Server %d: Closing all sockets except current socket: %d\n", getpid(), this_socket.sockfd);
+	printf("\nServer Child %d: Closing all sockets except current socket: %d\n", getpid(), this_socket.sockfd);
 	for(i=0 ; i<=noofintf ; i++)
 	{
 		if(this_socket.sockfd == intf_info[i].sockfd)
 			continue;
-		printf("\nChild Server %d: Closing socket: %d\n", getpid(), intf_info[i].sockfd);
+		printf("\nServer Child %d: Closing socket: %d\n", getpid(), intf_info[i].sockfd);
 		close(intf_info[i].sockfd);
 	}
 	
 	myaddr.sin_addr.s_addr = this_socket.ipaddress;
+	myaddr.sin_port = htons(0);
 	
 	//inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	//printf("\nIP Address is \t%s\n", str);
@@ -39,12 +43,7 @@ void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, sockle
 	n = recvfrom(this_socket.sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
 	inet_pton(AF_INET, Sock_ntop_host(pcliaddr, sizeof(*pcliaddr)), &(cliaddr.sin_addr));
 	cliaddr.sin_port = ((struct sockaddr_in*)pcliaddr)->sin_port;
-	
-	inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nChild Server %d: IPserver is %s\n", getpid(), str);
-	inet_ntop(AF_INET, &(cliaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nChild Server %d: IP Address of the connected client is %s\n", getpid(), str);
-	printf("\nChild Server %d: Port Number of the connected client is %d\n", getpid(), cliaddr.sin_port);
+
 	sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
 	
 	//Code to check if the client is local or not
@@ -52,6 +51,34 @@ void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, sockle
 		printf("\nThe client and the server are local\n");
 	else
 		printf("\nThe client and the server are not local\n");
+	
+	//Creating and binding a new Socket for FTP application
+	connfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if( (bind(connfd, (SA *) &myaddr, sizeof(myaddr))) == -1)
+	{
+		printf("\nServer Child %d: ERROR :Unable to bind socket : %d", getpid(), connfd);
+		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", getpid(), errno);
+		exit(0);
+	}
+	
+	
+	//if( (getsockname(connfd, (SA *) &myaddr, sizeof(myaddr))) == -1)
+		
+	if (getsockname(connfd, &myaddr, &sa_len) == -1)
+	{
+		printf("\nServer Child %d: ERROR : Unable to getsockname", getpid());
+		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", getpid(), errno);
+		exit(0);
+	}
+	
+	
+	inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	printf("\nServer Child %d: IPserver is %s\n", getpid(), str);
+	printf("\nServer Child %d: Port Number of IPserver is %d\n", getpid(), myaddr.sin_port);
+	inet_ntop(AF_INET, &(cliaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	printf("\nServer Child %d: IP Address of the connected client is %s\n", getpid(), str);
+	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), cliaddr.sin_port);
+	
 	
 	for ( ; ; ) 
 	{
@@ -67,10 +94,10 @@ int main(int argc, char **argv)
 	int maxfdp1 = 0; 
 	fd_set rset;
 	
-	int sockfd;
-	int i, result; 
-	const int on = 1;
+	int sockfd = 0;
+	int i = 0, result = 0; 
 	pid_t	child_pid;
+	const int on = 1;	
 	struct ifi_info	*ifi, *ifihead;
 	struct sockaddr_in *sa;
 	struct sockaddr_in cliaddr;
@@ -100,7 +127,7 @@ int main(int argc, char **argv)
 	//TODO How to make sure that only unicast addresses are bound??	
 	
 	//Iterating through all the interfaces
-	int noofintf;
+	int noofintf = 0;
 	for (ifihead = ifi = Get_ifi_info_plus(AF_INET, 1);
 		 ifi != NULL; ifi = ifi->ifi_next) 
 	{
@@ -115,8 +142,8 @@ int main(int argc, char **argv)
 		
 		if( (bind(sockfd, (SA *) sa, sizeof(*sa))) == -1)
 		{
-			printf("\n server : Unable to bind socket : %d", sockfd);
-			printf("\n server : The error number is as follows : %d. Exitting", errno);
+			printf("\n server : ERROR :Unable to bind socket : %d", sockfd);
+			printf("\n server : ERROR :The error number is as follows : %d. Exitting", errno);
 			exit(0);
 		}
 		
@@ -167,7 +194,7 @@ int main(int argc, char **argv)
 		
 		if(result == -1)
 		{
-			printf("\nServer Parent: Something wrong with select. Resetting \n");
+			printf("\nServer Parent: ERROR :Something wrong with select. Resetting \n");
 			//continue;
 		}
 		
@@ -191,7 +218,7 @@ int main(int argc, char **argv)
 				}
 				else // fork failed
 				{
-					printf("\nServer Parent: Forking the child failed. Exitting\n");
+					printf("\nServer Parent: ERROR :Forking the child failed. Exitting\n");
 					exit(0);
 				}
 			}

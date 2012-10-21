@@ -19,7 +19,7 @@ server.o: server.c
 	${CC} ${CFLAGS} -c server.c
 	
 client: client.o 
-	${CC} ${CFLAGS} -o $@ client.o ${LIBS}
+	${CC} ${CFLAGS} -o $@ /home/courses/cse533/Asgn2_code/get_ifi_info_plus.o client.o ${LIBS}
 
 client.o: client.c
 	${CC} ${CFLAGS} -c client.c
