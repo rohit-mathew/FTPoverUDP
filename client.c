@@ -8,7 +8,7 @@ struct socket_info{
  	
 
 
-void dg_cli(FILE *fp, int sockfd, const struct sockaddr *pservaddr, socklen_t servlen)
+void ftp_cli(FILE *fp, int sockfd, const struct sockaddr *pservaddr, socklen_t servlen)
 {
 	int	n;
 	char	sendline[MAXLINE], recvline[MAXLINE + 1];
@@ -35,6 +35,7 @@ int main(int argc, char **argv)
 	struct sockaddr_in IPclient, IPserver;
 	struct socket_info intf_info[32];
 	int i = 0, setflag = 0;
+	int sa_len = sizeof(IPclient);
 	
 	//Client parameters
 	char serverIP[INET_ADDRSTRLEN];
@@ -44,6 +45,10 @@ int main(int argc, char **argv)
 	int randseed; //TODO
 	int lossprob;
 	int meanu;
+	
+	//Zeroing out IPserver and Ipclient
+	bzero(&IPclient, sizeof(IPclient));
+	bzero(&IPserver, sizeof(IPserver));
 	
 	//Read client.in file
 	//TODO Error check here for wrong values input from user
@@ -107,13 +112,12 @@ int main(int argc, char **argv)
 		printf("Subnet Address is \t%s\n", str);
 	}
 	
-	//Setting the values of IPserver
+	//Setting the values of IPserver TODO
 	inet_pton(AF_INET, serverIP, &(IPserver.sin_addr));
-	IPserver.sin_port = server_port;
-	printf("\nSetting the IP address and the port number of the server (IPserver)\n");
-	inet_ntop(AF_INET, &(IPserver.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nIP Address of the server (IPserver) is \t%s\n", str);
-	printf("Port Number of the server (IPserver) is \t%d\n", IPserver.sin_port);
+	//printf("\nSetting the IP address and the port number of the server (IPserver)\n");
+	//inet_ntop(AF_INET, &(IPserver.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	//printf("\nIP Address of the server (IPserver) is \t%s\n", str);
+	//printf("Port Number of the server (IPserver) is \t%d\n", server_port);
 	
 	printf("\nSetting the IP address and the port number of the server (IPserver)\n");
 	//Check if the server is on loopback address
@@ -135,6 +139,7 @@ int main(int argc, char **argv)
 		}
 	}
 	
+	//If the server is not the same host nor if it is in the same subnet
 	if(setflag == 0)
 	{
 		printf("\nThe server is not on the same host nor is it on the same subnet\n");
@@ -142,18 +147,44 @@ int main(int argc, char **argv)
 	}	
 	
 	IPclient.sin_port = htons(0);
+	
+	//Creating a new socket
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	
+	if( (bind(sockfd, (SA *) &IPclient, sizeof(IPclient))) == -1)
+	{
+		printf("\nERROR :Unable to bind socket : %d", sockfd);
+		printf("\nERROR :The error number is as follows : %d. \nExitting", errno);
+		exit(0);
+	}
+	
+	if (getsockname(sockfd, &IPclient, &sa_len) == -1)
+	{
+		printf("\nERROR : Unable to getsockname");
+		printf("\nERROR :The erorr number is as follows : %d", errno);
+		exit(0);
+	}
+	
+	//Printing the IPclient details
 	inet_ntop(AF_INET, &(IPclient.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	printf("\nIP Address of the client (IPclient) is \t%s\n", str);
 	printf("Port Number of the client (IPclient) is \t%d\n", IPclient.sin_port);
 	
-	bzero(&servaddr, sizeof(servaddr));
-	servaddr.sin_family = AF_INET;
-	servaddr.sin_port = htons(10988);
-	inet_pton(AF_INET, argv[1], &servaddr.sin_addr);
+	
+	
+	//Connecting to the server
+	if(connect(sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver)) == -1)
+	{
+		printf("\nERROR :Was unable to connect. Please check the server");
+		printf("\nERROR :The error number is as follows : %d. Exitting\n", errno);
+		//exit(0);
+	}
+	
+	IPserver.sin_family = AF_INET;
+	IPserver.sin_port = htons(server_port);
+	
 
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
-	dg_cli(stdin, sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr));
+	ftp_cli(stdin, sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver));
 
 	exit(0);
 }

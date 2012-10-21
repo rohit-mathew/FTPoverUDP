@@ -61,8 +61,6 @@ void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, sockle
 		exit(0);
 	}
 	
-	
-	//if( (getsockname(connfd, (SA *) &myaddr, sizeof(myaddr))) == -1)
 		
 	if (getsockname(connfd, &myaddr, &sa_len) == -1)
 	{
@@ -75,6 +73,7 @@ void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, sockle
 	inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	printf("\nServer Child %d: IPserver is %s\n", getpid(), str);
 	printf("\nServer Child %d: Port Number of IPserver is %d\n", getpid(), myaddr.sin_port);
+	
 	inet_ntop(AF_INET, &(cliaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	printf("\nServer Child %d: IP Address of the connected client is %s\n", getpid(), str);
 	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), cliaddr.sin_port);
