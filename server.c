@@ -11,73 +11,94 @@ struct socket_info{
  	
 struct socket_info intf_info[32];
 
-void mydg_echo(struct socket_info this_socket, struct sockaddr *pcliaddr, socklen_t clilen, int noofintf)
+void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, socklen_t clilen, int noofintf)
 {
 	pid_t mypid;
 	mypid = getpid();
-	printf("\nChild %d: Reached mydg_echo\n", mypid);
+	printf("\nChild %d: Reached forked ftp_server function\n", mypid);
 	int n, i = 0;
 	int connfd;
 	char mesg[MAXLINE];
 	char str[INET_ADDRSTRLEN];
-	struct sockaddr_in myaddr, cliaddr;
-	socklen_t	len;
-	int sa_len = sizeof(myaddr);
+	struct sockaddr_in IPserver, IPclient;
+	struct sockaddr_in temp;
+	socklen_t len;
+	int sa_len = sizeof(IPserver);
 	
-	//Code to close all the sockets except this_socket.sockfd
-	printf("\nServer Child %d: Closing all sockets except current socket: %d\n", getpid(), this_socket.sockfd);
+	//Variables for getpeername stuff
+	socklen_t slen;
+	struct sockaddr_storage temp_storage;
+	char ipstr[INET6_ADDRSTRLEN];
+	int port;	
+	slen = sizeof(temp_storage);
+	
+	//Code to close all the sockets except Listening socket
+	printf("\nServer Child %d: Closing all sockets except Listening socket: %d\n", getpid(), this_socket.sockfd);
 	for(i=0 ; i<=noofintf ; i++)
 	{
 		if(this_socket.sockfd == intf_info[i].sockfd)
 			continue;
-		printf("\nServer Child %d: Closing socket: %d\n", getpid(), intf_info[i].sockfd);
 		close(intf_info[i].sockfd);
 	}
 	
-	myaddr.sin_addr.s_addr = this_socket.ipaddress;
-	myaddr.sin_port = htons(0);
+	IPserver.sin_addr.s_addr = this_socket.ipaddress;
+	IPserver.sin_port = htons(0);
 	
-	//inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	//printf("\nIP Address is \t%s\n", str);
 	len = clilen;
 	n = recvfrom(this_socket.sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
-	inet_pton(AF_INET, Sock_ntop_host(pcliaddr, sizeof(*pcliaddr)), &(cliaddr.sin_addr));
-	cliaddr.sin_port = ((struct sockaddr_in*)pcliaddr)->sin_port;
-
-	sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
+	printf("\nServer Child %d: The client has requested the file %s\n", getpid(), mesg);
+	//TODO Try to open the file
+	
+	//Initializing IPclient
+	inet_pton(AF_INET, Sock_ntop_host(pcliaddr, sizeof(*pcliaddr)), &(IPclient.sin_addr));
+	IPclient.sin_port = ((struct sockaddr_in*)pcliaddr)->sin_port;
+	
+	//sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
 	
 	//Code to check if the client is local or not
-	if((cliaddr.sin_addr.s_addr&this_socket.networkmask) == this_socket.subnetaddress)
-		printf("\nThe client and the server are local\n");
+	if((IPclient.sin_addr.s_addr&this_socket.networkmask) == this_socket.subnetaddress)
+		printf("\nServer Child %d: The client and the server are local\n", getpid());
 	else
-		printf("\nThe client and the server are not local\n");
+		printf("\nServer Child %d: The client and the server are not local\n", getpid());
 	
 	//Creating and binding a new Socket for FTP application
 	connfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if( (bind(connfd, (SA *) &myaddr, sizeof(myaddr))) == -1)
+	if( (bind(connfd, (SA *) &IPserver, sizeof(IPserver))) == -1)
 	{
 		printf("\nServer Child %d: ERROR :Unable to bind socket : %d", getpid(), connfd);
 		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", getpid(), errno);
 		exit(0);
 	}
 	
-		
-	if (getsockname(connfd, &myaddr, &sa_len) == -1)
+	if (getsockname(connfd, &temp, &sa_len) == -1)
 	{
 		printf("\nServer Child %d: ERROR : Unable to getsockname", getpid());
 		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", getpid(), errno);
 		exit(0);
 	}
 	
-	
-	inet_ntop(AF_INET, &(myaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	//Printing out the details of the server
+	inet_ntop(AF_INET, &(temp.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	printf("\nServer Child %d: IPserver is %s\n", getpid(), str);
-	printf("\nServer Child %d: Port Number of IPserver is %d\n", getpid(), myaddr.sin_port);
+	printf("\nServer Child %d: Port Number of IPserver is %d\n", getpid(), temp.sin_port);
 	
-	inet_ntop(AF_INET, &(cliaddr.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	IPserver.sin_port = temp.sin_port;
+	
+	IPclient.sin_family = AF_INET;
+	
+	if(connect(connfd, (struct sockaddr *) &IPclient, sizeof(IPclient)) == -1)
+	{
+		printf("\nERROR :Was unable to connect on socket %d. Please check the client", connfd);
+		printf("\nERROR :The error number is as follows : %d. Exitting\n", errno);
+		exit(0);
+	}
+	else
+		printf("\nServer Child %d: Connected to client on socket : %d\n", getpid(), connfd);
+	
+	//Printing out the details of the connected client
+	inet_ntop(AF_INET, &(IPclient.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	printf("\nServer Child %d: IP Address of the connected client is %s\n", getpid(), str);
-	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), cliaddr.sin_port);
-	
+	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), IPclient.sin_port);
 	
 	for ( ; ; ) 
 	{
@@ -208,7 +229,7 @@ int main(int argc, char **argv)
 				{
 					if(child_pid == 0) // child process
 					{
-					    mydg_echo(intf_info[i], (struct sockaddr *) &cliaddr, sizeof(cliaddr), noofintf);
+					    ftp_server(intf_info[i], (struct sockaddr *) &cliaddr, sizeof(cliaddr), noofintf);
 					}
 					else //Parent process TODO Anything to be done here
 					{

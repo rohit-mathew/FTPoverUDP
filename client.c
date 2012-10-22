@@ -12,10 +12,12 @@ void ftp_cli(FILE *fp, int sockfd, const struct sockaddr *pservaddr, socklen_t s
 {
 	int	n;
 	char	sendline[MAXLINE], recvline[MAXLINE + 1];
+	
+	
 
 	while (fgets(sendline, MAXLINE, fp) != NULL) {
 
-		sendto(sockfd, sendline, strlen(sendline), 0, pservaddr, servlen);
+		sendto(sockfd, sendline, strlen(sendline), 0, NULL, 0);
 
 		n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
 
@@ -33,9 +35,17 @@ int main(int argc, char **argv)
 	struct ifi_info	*ifi, *ifihead;
 	struct sockaddr_in *sa;
 	struct sockaddr_in IPclient, IPserver;
+	struct sockaddr_in temp;
 	struct socket_info intf_info[32];
 	int i = 0, setflag = 0;
 	int sa_len = sizeof(IPclient);
+	
+	//Variables for getpeername stuff
+	socklen_t slen;
+	struct sockaddr_storage temp_storage;
+	char ipstr[INET6_ADDRSTRLEN];
+	int port;	
+	slen = sizeof(temp_storage);
 	
 	//Client parameters
 	char serverIP[INET_ADDRSTRLEN];
@@ -49,6 +59,8 @@ int main(int argc, char **argv)
 	//Zeroing out IPserver and Ipclient
 	bzero(&IPclient, sizeof(IPclient));
 	bzero(&IPserver, sizeof(IPserver));
+	
+	bzero(&temp, sizeof(temp));
 	
 	//Read client.in file
 	//TODO Error check here for wrong values input from user
@@ -114,10 +126,6 @@ int main(int argc, char **argv)
 	
 	//Setting the values of IPserver TODO
 	inet_pton(AF_INET, serverIP, &(IPserver.sin_addr));
-	//printf("\nSetting the IP address and the port number of the server (IPserver)\n");
-	//inet_ntop(AF_INET, &(IPserver.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	//printf("\nIP Address of the server (IPserver) is \t%s\n", str);
-	//printf("Port Number of the server (IPserver) is \t%d\n", server_port);
 	
 	printf("\nSetting the IP address and the port number of the server (IPserver)\n");
 	//Check if the server is on loopback address
@@ -147,18 +155,19 @@ int main(int argc, char **argv)
 	}	
 	
 	IPclient.sin_port = htons(0);
+	IPclient.sin_family = AF_INET;
 	
 	//Creating a new socket
 	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 	
-	if( (bind(sockfd, (SA *) &IPclient, sizeof(IPclient))) == -1)
+	if( (bind(sockfd, (struct sockaddr *) &IPclient, sa_len)) == -1)
 	{
 		printf("\nERROR :Unable to bind socket : %d", sockfd);
 		printf("\nERROR :The error number is as follows : %d. \nExitting", errno);
 		exit(0);
 	}
 	
-	if (getsockname(sockfd, &IPclient, &sa_len) == -1)
+	if (getsockname(sockfd, &temp, &sa_len) == -1)
 	{
 		printf("\nERROR : Unable to getsockname");
 		printf("\nERROR :The erorr number is as follows : %d", errno);
@@ -166,13 +175,14 @@ int main(int argc, char **argv)
 	}
 	
 	//Printing the IPclient details
-	inet_ntop(AF_INET, &(IPclient.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nIP Address of the client (IPclient) is \t%s\n", str);
-	printf("Port Number of the client (IPclient) is \t%d\n", IPclient.sin_port);
+	inet_ntop(AF_INET, &(temp.sin_addr.s_addr), str, INET_ADDRSTRLEN);
+	printf("\nIP Address of the client (IPclient) is \t\t%s\n", str);
+	printf("Port Number of the client (IPclient) is \t%d\n", temp.sin_port);	
 	
-	
-	
-	//Connecting to the server
+	IPserver.sin_port = htons(server_port);
+	IPserver.sin_family = AF_INET;
+	setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+	//Connecting to the server	
 	if(connect(sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver)) == -1)
 	{
 		printf("\nERROR :Was unable to connect. Please check the server");
@@ -180,11 +190,24 @@ int main(int argc, char **argv)
 		//exit(0);
 	}
 	
-	IPserver.sin_family = AF_INET;
-	IPserver.sin_port = htons(server_port);
+	//GetPeerName stuff
+	bzero(&temp_storage, sizeof(temp_storage));
+	getpeername(sockfd, (struct sockaddr*)&temp_storage, &slen);
 	
-
-	ftp_cli(stdin, sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver));
-
-	exit(0);
+	// deal with both IPv4 and IPv6:
+	struct sockaddr_in *sock_temp = (struct sockaddr_in *)&temp_storage;
+	port = ntohs(sock_temp->sin_port);
+	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
+	printf("Peer IP address: %s\n", ipstr);
+	printf("Peer port      : %d\n", port);
+	
+	printf("\nIP Address of the server (IPserver) is \t\t%s\n", ipstr);
+	printf("Port Number of the server (IPserver) is \t%d\n", port);
+	
+	sendto(sockfd, filename, strlen(filename), 0, NULL, 0);
+	//n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
+	
+	
+	//ftp_cli(stdin, sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver));
+	printf("\nReached the end of client program, exitting\n");
 }
