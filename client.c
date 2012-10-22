@@ -177,7 +177,7 @@ int main(int argc, char **argv)
 	//Printing the IPclient details
 	inet_ntop(AF_INET, &(temp.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	printf("\nIP Address of the client (IPclient) is \t\t%s\n", str);
-	printf("Port Number of the client (IPclient) is \t%d\n", temp.sin_port);	
+	printf("Port Number (Well known) of the client (IPclient) is \t%d\n", temp.sin_port);	
 	
 	IPserver.sin_port = htons(server_port);
 	IPserver.sin_family = AF_INET;
@@ -193,13 +193,9 @@ int main(int argc, char **argv)
 	//GetPeerName stuff
 	bzero(&temp_storage, sizeof(temp_storage));
 	getpeername(sockfd, (struct sockaddr*)&temp_storage, &slen);
-	
-	// deal with both IPv4 and IPv6:
 	struct sockaddr_in *sock_temp = (struct sockaddr_in *)&temp_storage;
 	port = ntohs(sock_temp->sin_port);
 	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
-	printf("Peer IP address: %s\n", ipstr);
-	printf("Peer port      : %d\n", port);
 	
 	printf("\nIP Address of the server (IPserver) is \t\t%s\n", ipstr);
 	printf("Port Number of the server (IPserver) is \t%d\n", port);

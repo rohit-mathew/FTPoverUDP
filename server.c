@@ -96,9 +96,16 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 		printf("\nServer Child %d: Connected to client on socket : %d\n", getpid(), connfd);
 	
 	//Printing out the details of the connected client
+	//GetPeerName stuff
+	bzero(&temp_storage, sizeof(temp_storage));
+	getpeername(connfd, (struct sockaddr*)&temp_storage, &slen);
+	struct sockaddr_in *sock_temp = (struct sockaddr_in *)&temp_storage;
+	port = ntohs(sock_temp->sin_port);
+	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
+	
 	inet_ntop(AF_INET, &(IPclient.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nServer Child %d: IP Address of the connected client is %s\n", getpid(), str);
-	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), IPclient.sin_port);
+	printf("\nServer Child %d: IP Address of the connected client is %s\n", getpid(), ipstr);
+	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), port);
 	
 	for ( ; ; ) 
 	{
