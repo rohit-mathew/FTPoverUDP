@@ -1,5 +1,12 @@
 #include "unpifiplus.h"
 
+
+/*
+TODO
+
+1. Check the error conditions on all the functions
+2. 
+*/
 struct socket_info{
 	uint32_t ipaddress;
 	uint32_t networkmask;
@@ -37,8 +44,9 @@ int main(int argc, char **argv)
 	struct sockaddr_in IPclient, IPserver;
 	struct sockaddr_in temp;
 	struct socket_info intf_info[32];
-	int i = 0, setflag = 0;
+	int i = 0, setflag = 0, n = 0;
 	int sa_len = sizeof(IPclient);
+	char	sendline[MAXLINE], recvline[MAXLINE + 1];
 	
 	//Variables for getpeername stuff
 	socklen_t slen;
@@ -177,7 +185,7 @@ int main(int argc, char **argv)
 	//Printing the IPclient details
 	inet_ntop(AF_INET, &(temp.sin_addr.s_addr), str, INET_ADDRSTRLEN);
 	printf("\nIP Address of the client (IPclient) is \t\t%s\n", str);
-	printf("Port Number (Well known) of the client (IPclient) is \t%d\n", temp.sin_port);	
+	printf("Port Number of the client (IPclient) is \t%d\n", temp.sin_port);	
 	
 	IPserver.sin_port = htons(server_port);
 	IPserver.sin_family = AF_INET;
@@ -187,8 +195,10 @@ int main(int argc, char **argv)
 	{
 		printf("\nERROR :Was unable to connect. Please check the server");
 		printf("\nERROR :The error number is as follows : %d. Exitting\n", errno);
-		//exit(0);
+		exit(0);
 	}
+	else
+		printf("\nConnected to the server on the well known port number\n");
 	
 	//GetPeerName stuff
 	bzero(&temp_storage, sizeof(temp_storage));
@@ -198,12 +208,63 @@ int main(int argc, char **argv)
 	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
 	
 	printf("\nIP Address of the server (IPserver) is \t\t%s\n", ipstr);
+	printf("Port Number (well known port number) of the server (IPserver) is \t%d\n", port);
+		
+	sendto(sockfd, filename, strlen(filename), 0, NULL, 0);
+	if( (n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL)) != 0)
+		recvline[n] = 0;
+	else
+	{
+		printf("\nReceived nothing from the server. Looks like the server is down. Exitting \n");
+		exit(0);
+	}
+			
+	
+	printf("\nReceived a new port number from the server : %s.\n", recvline);
+	//Breaking the previous connection
+	IPserver.sin_family = AF_UNSPEC;
+	if(connect(sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver)) == -1)
+	{
+		printf("\nERROR :Was unable to connect to the server on new port. Please check the server");
+		printf("\nERROR :The error number is as follows : %d. Exitting\n", errno);
+		exit(0);
+	}
+	else
+		printf("\nBroke the connection to the server\n");
+	
+	//Making a new connection
+	bzero(&IPserver, sizeof(IPserver));
+	inet_pton(AF_INET, serverIP, &(IPserver.sin_addr));
+	IPserver.sin_port = strtol(recvline, NULL,10);
+	IPserver.sin_family = AF_INET;
+	if(connect(sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver)) == -1)
+	{
+		printf("\nERROR :Was unable to connect to the server on new port. Please check the server");
+		printf("\nERROR :The error number is as follows : %d. Exitting\n", errno);
+		exit(0);
+	}
+	else
+		printf("\nConnected to the server with the new port numer.\n");
+	
+	
+	//GetPeerName stuff
+	bzero(&temp_storage, sizeof(temp_storage));
+	getpeername(sockfd, (struct sockaddr*)&temp_storage, &slen);
+	struct sockaddr_in *sock1_temp = (struct sockaddr_in *)&temp_storage;
+	port = ntohs(sock_temp->sin_port);
+	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
+	
+	printf("\nIP Address of the server (IPserver) is \t\t%s\n", ipstr);
 	printf("Port Number of the server (IPserver) is \t%d\n", port);
 	
+	
+	//@Chaitanya This is some sample code, that just echoes the file name
+	//@Chaitanya sockfd is the final connected socket
+	                  
 	sendto(sockfd, filename, strlen(filename), 0, NULL, 0);
-	//n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
+	n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
 	
+	printf("\nReceived from server : %s", recvline);
 	
-	//ftp_cli(stdin, sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver));
 	printf("\nReached the end of client program, exitting\n");
 }

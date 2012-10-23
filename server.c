@@ -19,7 +19,9 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	int n, i = 0;
 	int connfd;
 	char mesg[MAXLINE];
+	char filename[MAXLINE];
 	char str[INET_ADDRSTRLEN];
+	const int on = 1;
 	struct sockaddr_in IPserver, IPclient;
 	struct sockaddr_in temp;
 	socklen_t len;
@@ -47,13 +49,14 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	len = clilen;
 	n = recvfrom(this_socket.sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
 	printf("\nServer Child %d: The client has requested the file %s\n", getpid(), mesg);
+	strcpy (filename,mesg);
 	//TODO Try to open the file
 	
 	//Initializing IPclient
 	inet_pton(AF_INET, Sock_ntop_host(pcliaddr, sizeof(*pcliaddr)), &(IPclient.sin_addr));
 	IPclient.sin_port = ((struct sockaddr_in*)pcliaddr)->sin_port;
 	
-	//sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
+	
 	
 	//Code to check if the client is local or not
 	if((IPclient.sin_addr.s_addr&this_socket.networkmask) == this_socket.subnetaddress)
@@ -79,13 +82,13 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	
 	//Printing out the details of the server
 	inet_ntop(AF_INET, &(temp.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nServer Child %d: IPserver is %s\n", getpid(), str);
+	printf("\nServer Child %d: IPserver is %s", getpid(), str);
 	printf("\nServer Child %d: Port Number of IPserver is %d\n", getpid(), temp.sin_port);
 	
 	IPserver.sin_port = temp.sin_port;
 	
 	IPclient.sin_family = AF_INET;
-	
+	setsockopt(connfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	if(connect(connfd, (struct sockaddr *) &IPclient, sizeof(IPclient)) == -1)
 	{
 		printf("\nERROR :Was unable to connect on socket %d. Please check the client", connfd);
@@ -104,15 +107,22 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
 	
 	inet_ntop(AF_INET, &(IPclient.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nServer Child %d: IP Address of the connected client is %s\n", getpid(), ipstr);
+	printf("\nServer Child %d: IP Address of the connected client is %s", getpid(), ipstr);
 	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), port);
 	
-	for ( ; ; ) 
-	{
-		len = clilen;
-		n = recvfrom(this_socket.sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
-		sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
-	}
+	//Sending the new ephemeral port number to client
+	sprintf(mesg, "%d", IPserver.sin_port);
+	sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
+	close(this_socket.sockfd);
+	
+	//@Chaitanya This is some sample code, that just echoes the file name
+	//@Chaitanya connfd is the final connected socket
+	
+	n = recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
+	sendto(connfd, mesg, n, 0, NULL, 0);	
+	
+	printf("\nReached the end of the server child code\n");
+	return;
 }
 
 int main(int argc, char **argv)
@@ -222,7 +232,9 @@ int main(int argc, char **argv)
 		if(result == -1)
 		{
 			printf("\nServer Parent: ERROR :Something wrong with select. Resetting \n");
-			//continue;
+			printf("\nServer Parent: ERROR :Errnumber is as follows %d\n", errno);
+			perror("Select error");
+			exit(0);
 		}
 		
 		for(i=0; i<=noofintf ; i++)
@@ -237,10 +249,11 @@ int main(int argc, char **argv)
 					if(child_pid == 0) // child process
 					{
 					    ftp_server(intf_info[i], (struct sockaddr *) &cliaddr, sizeof(cliaddr), noofintf);
+					    exit(0);
 					}
 					else //Parent process TODO Anything to be done here
 					{
-					    printf("\nServer Parent: Parent Process");
+					    //printf("\nServer Parent: Parent Process");
 					}
 				}
 				else // fork failed
