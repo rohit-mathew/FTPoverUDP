@@ -13,3 +13,16 @@ int shallisend()
 	else
 		return 1;
 }
+
+int main()
+{
+	if(shallisend() == 0)
+	{
+		printf("Dont send packet");
+	}
+	else
+	{
+		printf("Send the packet");
+	}
+	return 1;	
+}
