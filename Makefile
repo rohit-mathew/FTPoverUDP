@@ -1,4 +1,4 @@
-PROGS =	server client
+PROGS =	rttC.o server client
 
 CC = gcc 
 
@@ -13,16 +13,19 @@ CFLAGS = ${FLAGS} -I /home/courses/cse533/Stevens/unpv13e_solaris2.10/lib \
 all: ${PROGS}
 
 server: server.o 
-	${CC} ${CFLAGS} -o $@ /home/courses/cse533/Asgn2_code/get_ifi_info_plus.o server.o ${LIBS}
+	${CC} ${CFLAGS} -o $@ /home/courses/cse533/Asgn2_code/get_ifi_info_plus.o server.o rttC.o ${LIBS}
 
 server.o: server.c
 	${CC} ${CFLAGS} -c server.c
 	
 client: client.o 
-	${CC} ${CFLAGS} -o $@ /home/courses/cse533/Asgn2_code/get_ifi_info_plus.o client.o ${LIBS}
+	${CC} ${CFLAGS} -o $@ /home/courses/cse533/Asgn2_code/get_ifi_info_plus.o client.o rttC.o ${LIBS}
 
 client.o: client.c
 	${CC} ${CFLAGS} -c client.c
+	
+rttC.o: rttC.c
+	${CC} ${CFLAGS} -c rttC.c
 clean:
 	rm -f ${PROGS} 
 	rm -f *~

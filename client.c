@@ -47,6 +47,8 @@ int main(int argc, char **argv)
 	int i = 0, setflag = 0, n = 0;
 	int sa_len = sizeof(IPclient);
 	char	sendline[MAXLINE], recvline[MAXLINE + 1];
+	int result;
+	int testip = inet_addr("0.0.0.0");
 	
 	//Variables for getpeername stuff
 	socklen_t slen;
@@ -142,16 +144,46 @@ int main(int argc, char **argv)
 		printf("\nThe server is local (on the same host as the client)\n");
 		inet_pton(AF_INET, serverIP, &(IPclient.sin_addr));
 		setflag = 1;		
-	}	
-	//TODO Check if the server is the same subnet
-	for(i=0; i<=noofintf ; i++)
+	}
+	//Check if the server is on the same host
+	if(setflag == 0)
 	{
-		if((IPserver.sin_addr.s_addr&intf_info[i].networkmask) == intf_info[i].subnetaddress)
+		for(i=0; i<=noofintf ; i++)
 		{
-			inet_ntop(AF_INET, &(intf_info[i].ipaddress), str, INET_ADDRSTRLEN);
-			printf("\nThe server is on the same subnet as the client IP address %s\n", str);
-			IPclient.sin_addr.s_addr = intf_info[i].ipaddress;
-			setflag = 1;
+			if(inet_addr(serverIP) == intf_info[i].ipaddress)
+			{
+				memset(recvline,0,sizeof(recvline));
+				printf("\nThe server and the client are both on the same host\n");
+				inet_pton(AF_INET, "127.0.0.1", &(IPclient.sin_addr));
+				inet_pton(AF_INET, "127.0.0.1", &(IPserver.sin_addr));
+				setflag = 1;
+				break;
+			}
+		}
+	}
+	
+	//TODO Check if the server is the same subnet
+	if(setflag == 0)
+	{
+		for(i=0; i<=noofintf ; i++)
+		{
+			if((IPserver.sin_addr.s_addr&intf_info[i].networkmask) == intf_info[i].subnetaddress)
+			{
+				inet_ntop(AF_INET, &(intf_info[i].ipaddress), str, INET_ADDRSTRLEN);
+				printf("\nThe server is on the same subnet as the client IP address %s", str);
+				//Doing longest prefix matching
+				if(intf_info[i].ipaddress >= testip)
+				{
+					IPclient.sin_addr.s_addr = intf_info[i].ipaddress;
+					testip = intf_info[i].ipaddress;
+				}
+				setflag = 1;
+			}
+		}
+		if(setflag == 1)
+		{
+			inet_ntop(AF_INET, &(testip), str, INET_ADDRSTRLEN);
+			printf("\nThe ip address %s was chosen as it had the longest matching prefix.\n", str);
 		}
 	}
 	
@@ -159,7 +191,7 @@ int main(int argc, char **argv)
 	if(setflag == 0)
 	{
 		printf("\nThe server is not on the same host nor is it on the same subnet\n");
-		IPclient.sin_addr.s_addr = intf_info[0].ipaddress;
+		IPclient.sin_addr.s_addr = intf_info[1].ipaddress;
 	}	
 	
 	IPclient.sin_port = htons(0);
@@ -167,6 +199,13 @@ int main(int argc, char **argv)
 	
 	//Creating a new socket
 	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if(setflag == 1)
+	{
+		setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR|SO_DONTROUTE, &on, sizeof(on));
+		printf("\nThe client and the server are local. Hence setting SO_DONTROUTE\n");
+	}
+	else
+		setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	
 	if( (bind(sockfd, (struct sockaddr *) &IPclient, sa_len)) == -1)
 	{
@@ -193,12 +232,11 @@ int main(int argc, char **argv)
 	//Connecting to the server	
 	if(connect(sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver)) == -1)
 	{
-		printf("\nERROR :Was unable to connect. Please check the server");
-		printf("\nERROR :The error number is as follows : %d. Exitting\n", errno);
+		perror("\nERROR :Exitting, Was unable to connect. Please check the server");
 		exit(0);
 	}
 	else
-		printf("\nConnected to the server on the well known port number\n");
+		printf("\nConnection request send to server on well known port.\n");
 	
 	//GetPeerName stuff
 	bzero(&temp_storage, sizeof(temp_storage));
@@ -207,18 +245,23 @@ int main(int argc, char **argv)
 	port = ntohs(sock_temp->sin_port);
 	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
 	
-	printf("\nIP Address of the server (IPserver) is \t\t%s\n", ipstr);
+	printf("\nIP Address of the server (IPserver) is \t\t\t\t\t%s\n", ipstr);
 	printf("Port Number (well known port number) of the server (IPserver) is \t%d\n", port);
 		
 	sendto(sockfd, filename, strlen(filename), 0, NULL, 0);
-	if( (n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL)) != 0)
+	if( (n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL)) > 0)
 		recvline[n] = 0;
 	else
 	{
-		printf("\nReceived nothing from the server. Looks like the server is down. Exitting \n");
+		perror("\nLooks like the server is down, exitting. Error Message");
 		exit(0);
 	}
-			
+	sendto(sockfd, recvline, strlen(recvline), 0, NULL, 0);
+	
+	//Server forks during this period
+	bzero(&recvline, sizeof(recvline));
+	recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
+	
 	
 	printf("\nReceived a new port number from the server : %s.\n", recvline);
 	//Breaking the previous connection
@@ -233,8 +276,6 @@ int main(int argc, char **argv)
 		printf("\nBroke the connection to the server\n");
 	
 	//Making a new connection
-	bzero(&IPserver, sizeof(IPserver));
-	inet_pton(AF_INET, serverIP, &(IPserver.sin_addr));
 	IPserver.sin_port = strtol(recvline, NULL,10);
 	IPserver.sin_family = AF_INET;
 	if(connect(sockfd, (struct sockaddr *) &IPserver, sizeof(IPserver)) == -1)
@@ -258,11 +299,21 @@ int main(int argc, char **argv)
 	printf("Port Number of the server (IPserver) is \t%d\n", port);
 	
 	
+	
+	//********************************************************************************************************
 	//@Chaitanya This is some sample code, that just echoes the file name
 	//@Chaitanya sockfd is the final connected socket
 	                  
-	sendto(sockfd, filename, strlen(filename), 0, NULL, 0);
-	n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
+	//sendto(sockfd, filename, strlen(filename), 0, NULL, 0);
+	//n = recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
+	
+	//printf("\nReceived from server : %s", recvline);
+	
+	memset(recvline,0,sizeof(recvline));
+	
+	sprintf(recvline, "%s", "Howdy there");
+	sendto(sockfd, recvline, sizeof(recvline), 0, NULL, 0);
+	recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
 	
 	printf("\nReceived from server : %s", recvline);
 	

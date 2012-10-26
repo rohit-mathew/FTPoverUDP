@@ -1,6 +1,10 @@
 #include "unpifiplus.h"
 
-
+/*
+*
+*  1. Implement timeouts for the send and receive of filename and ephemeral port number
+*  2. Error checking 
+*/
 
 struct socket_info{
 	int sockfd;
@@ -11,15 +15,15 @@ struct socket_info{
  	
 struct socket_info intf_info[32];
 
-void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, socklen_t clilen, int noofintf)
+void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, socklen_t clilen, int noofintf, char filename)
 {
 	pid_t mypid;
 	mypid = getpid();
-	printf("\nChild %d: Reached forked ftp_server function\n", mypid);
-	int n, i = 0;
+	printf("\nServer Child %d: Reached forked ftp_server function\n", mypid);
+	
+	int n, i = 0, setflag = 0;
 	int connfd;
 	char mesg[MAXLINE];
-	char filename[MAXLINE];
 	char str[INET_ADDRSTRLEN];
 	const int on = 1;
 	struct sockaddr_in IPserver, IPclient;
@@ -35,7 +39,7 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	slen = sizeof(temp_storage);
 	
 	//Code to close all the sockets except Listening socket
-	printf("\nServer Child %d: Closing all sockets except Listening socket: %d\n", getpid(), this_socket.sockfd);
+	printf("\nServer Child %d: Closing all sockets except Listening socket: %d\n", mypid, this_socket.sockfd);
 	for(i=0 ; i<=noofintf ; i++)
 	{
 		if(this_socket.sockfd == intf_info[i].sockfd)
@@ -47,43 +51,46 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	IPserver.sin_port = htons(0);
 	
 	len = clilen;
-	n = recvfrom(this_socket.sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
-	printf("\nServer Child %d: The client has requested the file %s\n", getpid(), mesg);
-	strcpy (filename,mesg);
-	//TODO Try to open the file
 	
 	//Initializing IPclient
 	inet_pton(AF_INET, Sock_ntop_host(pcliaddr, sizeof(*pcliaddr)), &(IPclient.sin_addr));
 	IPclient.sin_port = ((struct sockaddr_in*)pcliaddr)->sin_port;
-	
-	
-	
+		
 	//Code to check if the client is local or not
 	if((IPclient.sin_addr.s_addr&this_socket.networkmask) == this_socket.subnetaddress)
-		printf("\nServer Child %d: The client and the server are local\n", getpid());
+	{
+		printf("\nServer Child %d: The client and the server are local. Hence setting SO_DONTROUTE\n", mypid);
+		setflag = 1;
+	}
 	else
-		printf("\nServer Child %d: The client and the server are not local\n", getpid());
+	{
+		printf("\nServer Child %d: The client and the server are not local\n", mypid);
+	}
 	
 	//Creating and binding a new Socket for FTP application
 	connfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if(setflag == 1)
+		setsockopt(connfd, SOL_SOCKET, SO_REUSEADDR|SO_DONTROUTE, &on, sizeof(on));
+	else
+		setsockopt(connfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	if( (bind(connfd, (SA *) &IPserver, sizeof(IPserver))) == -1)
 	{
-		printf("\nServer Child %d: ERROR :Unable to bind socket : %d", getpid(), connfd);
-		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", getpid(), errno);
+		printf("\nServer Child %d: ERROR :Unable to bind socket : %d", mypid, connfd);
+		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", mypid, errno);
 		exit(0);
 	}
 	
 	if (getsockname(connfd, &temp, &sa_len) == -1)
 	{
-		printf("\nServer Child %d: ERROR : Unable to getsockname", getpid());
-		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", getpid(), errno);
+		printf("\nServer Child %d: ERROR : Unable to getsockname", mypid);
+		printf("\nServer Child %d: ERROR :The erorr number is as follows : %d", mypid, errno);
 		exit(0);
 	}
 	
 	//Printing out the details of the server
 	inet_ntop(AF_INET, &(temp.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nServer Child %d: IPserver is %s", getpid(), str);
-	printf("\nServer Child %d: Port Number of IPserver is %d\n", getpid(), temp.sin_port);
+	printf("\nServer Child %d: IPserver is %s", mypid, str);
+	printf("\nServer Child %d: Port Number of IPserver is %d\n", mypid, temp.sin_port);
 	
 	IPserver.sin_port = temp.sin_port;
 	
@@ -96,7 +103,7 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 		exit(0);
 	}
 	else
-		printf("\nServer Child %d: Connected to client on socket : %d\n", getpid(), connfd);
+		printf("\nServer Child %d: Connected to client on socket : %d\n", mypid, connfd);
 	
 	//Printing out the details of the connected client
 	//GetPeerName stuff
@@ -107,19 +114,39 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	inet_ntop(AF_INET, &sock_temp->sin_addr, ipstr, sizeof ipstr);
 	
 	inet_ntop(AF_INET, &(IPclient.sin_addr.s_addr), str, INET_ADDRSTRLEN);
-	printf("\nServer Child %d: IP Address of the connected client is %s", getpid(), ipstr);
-	printf("\nServer Child %d: Port Number of the connected client is %d\n", getpid(), port);
+	printf("\nServer Child %d: IP Address of the connected client is %s", mypid, ipstr);
+	printf("\nServer Child %d: Port Number of the connected client is %d\n", mypid, port);
 	
 	//Sending the new ephemeral port number to client
 	sprintf(mesg, "%d", IPserver.sin_port);
-	sendto(this_socket.sockfd, mesg, n, 0, pcliaddr, len);
+	printf("\n%s\n", mesg);
+	sendto(this_socket.sockfd, mesg, sizeof(mesg), 0, pcliaddr, len);
 	close(this_socket.sockfd);
 	
+	
+	//***Start of Part 2 code******************************************************************************************
+		
+	//sendto(connfd, mesg, n, 0, NULL, 0);
 	//@Chaitanya This is some sample code, that just echoes the file name
 	//@Chaitanya connfd is the final connected socket
 	
-	n = recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
-	sendto(connfd, mesg, n, 0, NULL, 0);	
+	//n = recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
+	//sendto(connfd, mesg, n, 0, NULL, 0);	
+	//*************************************************************************************************************
+	
+	
+	recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
+	sendto(connfd, mesg, sizeof(mesg), 0, NULL, 0);
+	
+	//***End of Part 2 code****************************************************************************************
+		
+	//sendto(connfd, mesg, n, 0, NULL, 0);
+	//@Chaitanya This is some sample code, that just echoes the file name
+	//@Chaitanya connfd is the final connected socket
+	
+	//n = recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
+	//sendto(connfd, mesg, n, 0, NULL, 0);	
+	//*************************************************************************************************************
 	
 	printf("\nReached the end of the server child code\n");
 	return;
@@ -130,6 +157,7 @@ int main(int argc, char **argv)
 	printf("\nServer Program \n");
 	int maxfdp1 = 0; 
 	fd_set rset;
+	int k;
 	
 	int sockfd = 0;
 	int i = 0, result = 0; 
@@ -138,9 +166,13 @@ int main(int argc, char **argv)
 	struct ifi_info	*ifi, *ifihead;
 	struct sockaddr_in *sa;
 	struct sockaddr_in cliaddr;
+	char mesg[MAXLINE];
 	
 	int server_port;
 	int window_size;
+	
+	int len = sizeof(cliaddr);
+	bzero(&cliaddr, sizeof(cliaddr));
 	
 	//Read server.in file
 	//TODO Error check here for wrong values input from user
@@ -232,7 +264,6 @@ int main(int argc, char **argv)
 		if(result == -1)
 		{
 			printf("\nServer Parent: ERROR :Something wrong with select. Resetting \n");
-			printf("\nServer Parent: ERROR :Errnumber is as follows %d\n", errno);
 			perror("Select error");
 			exit(0);
 		}
@@ -241,17 +272,28 @@ int main(int argc, char **argv)
 		{
 			if(FD_ISSET(intf_info[i].sockfd, &rset))
 			{
-				printf("\nServer Parent: Incoming datagram on socket : %d. Forking a child to handle this.\n", intf_info[i].sockfd);
+				bzero(&mesg, sizeof(mesg));
+				printf("\nServer Parent: Incoming datagram on socket : %d\n", intf_info[i].sockfd);
+				k = recvfrom(intf_info[i].sockfd, mesg, MAXLINE, 0, (struct sockaddr *) &cliaddr, &len);
+				
+				
+				//TODO Implement Timeouts here; Timeout value should be small
+				printf("\nServer Parent: The client has requested the file %s\n", mesg);
+				sendto(intf_info[i].sockfd, mesg, k, 0, (struct sockaddr *) &cliaddr, len);
+				printf("\nServer Parent: Sent an acknowledgement to the client. Waiting for response.\n");
+				recvfrom(intf_info[i].sockfd, mesg, MAXLINE, 0, (struct sockaddr *) &cliaddr, &len);
+				printf("\nServer Parent: Received a response. Forking a child to handle this.\n");
+				
 				child_pid = fork();
 			
 				if(child_pid >= 0) // fork was successful
 				{
 					if(child_pid == 0) // child process
 					{
-					    ftp_server(intf_info[i], (struct sockaddr *) &cliaddr, sizeof(cliaddr), noofintf);
+					    ftp_server(intf_info[i], (struct sockaddr *) &cliaddr, sizeof(cliaddr), noofintf, mesg);
 					    exit(0);
 					}
-					else //Parent process TODO Anything to be done here
+					else //Parent process 
 					{
 					    //printf("\nServer Parent: Parent Process");
 					}
