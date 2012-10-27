@@ -1,6 +1,18 @@
 #include "unpifiplus.h"
+#include	"unprtt.h"
+#include	<setjmp.h>
+#include	<sys/time.h>
 
+float random_gen()
+{
+        struct timeval  tv;
 
+        if (gettimeofday(&tv, NULL) == -1) {
+                perror("gettimeofday error: ");
+        }
+        srand48(tv.tv_usec); /* Setting the seed in microseconds since we are dealing in ms and microseconds */ 
+        return drand48();
+}
 /*
 TODO
 
@@ -12,7 +24,108 @@ struct socket_info{
 	uint32_t networkmask;
 	uint32_t subnetaddress;
  	}; 	
- 	
+ 	static struct msghdr	msgsend, msgrecv;	/* assumed init to 0 */
+static struct hdr {
+	uint32_t	seq;	/* sequence # */
+	uint32_t	ts;		/* timestamp when sent */
+	} sendhdr, recvhdr;
+
+static struct rtt_info   rttinfo;
+static int	rttinit = 0;
+static void	sig_alrm(int signo);
+static sigjmp_buf jmpbuf;
+
+ssize_t
+dg_send_recv(int fd, const void *outbuff, size_t outbytes,
+			 void *inbuff, size_t inbytes,
+			 const SA *destaddr, socklen_t destlen)
+{
+	ssize_t			n;
+	struct iovec	iovsend[2], iovrecv[2];
+	struct itimerval timer, oldtimer;
+	struct timeval tval;
+
+	if (rttinit == 0) {
+		rtt_init(&rttinfo);		/* first time we're called */
+		rttinit = 1;
+		rtt_d_flag = 1;
+	}
+
+	sendhdr.seq++;
+	msgsend.msg_name = NULL;
+	msgsend.msg_namelen = 0;
+	msgsend.msg_iov = iovsend;
+	msgsend.msg_iovlen = 2;
+	iovsend[0].iov_base = &sendhdr;
+	iovsend[0].iov_len = sizeof(struct hdr);
+	iovsend[1].iov_base = outbuff;
+	iovsend[1].iov_len = outbytes;
+
+	msgrecv.msg_name = NULL;
+	msgrecv.msg_namelen = 0;
+	msgrecv.msg_iov = iovrecv;
+	msgrecv.msg_iovlen = 2;
+	iovrecv[0].iov_base = &recvhdr;
+	iovrecv[0].iov_len = sizeof(struct hdr);
+	iovrecv[1].iov_base = inbuff;
+	iovrecv[1].iov_len = inbytes;
+/* end dgsendrecv1 */
+
+/* include dgsendrecv2 */
+	Signal(SIGALRM, sig_alrm);
+	rtt_newpack(&rttinfo);		/* initialize for this packet */
+	//printf("In dg_sed_recv function:");
+	//printf("The contents are : %s",msgsend.msg_iov[1].iov_base);
+sendagain:
+	sendhdr.ts = rtt_ts(&rttinfo);
+	sendmsg(fd, &msgsend, 0);
+
+	//alarm(rtt_start(&rttinfo));	/* calc timeout value & start timer */
+	tval.tv_sec = 0;
+	tval.tv_usec = rtt_start(&rttinfo)*1000; /* Converting milliseconds return value of rtt_start to microseconds */
+	timer.it_interval = tval;
+	timer.it_value = tval;
+	setitimer(ITIMER_REAL, &timer, &oldtimer); 
+	if (sigsetjmp(jmpbuf, 1) != 0) {
+		if (rtt_timeout(&rttinfo) < 0) {
+			err_msg("dg_send_recv: no response from server, giving up");
+			rttinit = 0;	/* reinit in case we're called again */
+			errno = ETIMEDOUT;
+			return(-1);
+		}
+		goto sendagain;
+	}
+
+	/*do {
+		n = recvmsg(fd, &msgrecv, 0);
+	} while (n < sizeof(struct hdr) || recvhdr.seq != sendhdr.seq);
+	*/
+	if((n = recvmsg(fd, &msgrecv, 0))>0)
+	{
+		printf("\nThe Client received : %s with sequence number:%d\n", msgrecv.msg_iov[1].iov_base,recvhdr.seq); 
+	}
+	else
+	{
+		printf("The recvmsg is failed in dg_send_recv");
+	}
+	msgrecv.msg_iov = NULL;
+	//alarm(0);			/* stop SIGALRM timer */
+	tval.tv_sec = 0;
+	tval.tv_usec = 0;
+	timer.it_interval = tval;
+	timer.it_value = tval;
+	setitimer(ITIMER_REAL, &timer, &oldtimer); 
+		/* 4calculate & store new RTT estimator values */
+	rtt_stop(&rttinfo, rtt_ts(&rttinfo) - recvhdr.ts);
+
+	return(n - sizeof(struct hdr));	/* return size of received datagram */
+}
+
+static void
+sig_alrm(int signo)
+{
+	siglongjmp(jmpbuf, 1);
+}
 
 
 void ftp_cli(FILE *fp, int sockfd, const struct sockaddr *pservaddr, socklen_t servlen)
@@ -46,15 +159,16 @@ int main(int argc, char **argv)
 	struct socket_info intf_info[32];
 	int i = 0, setflag = 0, n = 0;
 	int sa_len = sizeof(IPclient);
-	char	sendline[MAXLINE], recvline[MAXLINE + 1];
-	int result;
+	char	sendline[MAXLINE], recvline[MAXLINE + 1], recvcontent[MAXLINE], sendcontent[MAXLINE];
 	int testip = inet_addr("0.0.0.0");
+	
+	
 	
 	//Variables for getpeername stuff
 	socklen_t slen;
 	struct sockaddr_storage temp_storage;
 	char ipstr[INET6_ADDRSTRLEN];
-	int port;	
+	int port,x;		
 	slen = sizeof(temp_storage);
 	
 	//Client parameters
@@ -65,6 +179,9 @@ int main(int argc, char **argv)
 	int randseed; //TODO
 	int lossprob;
 	int meanu;
+	
+	float result;
+	struct iovec	iovsend[2], iovrecv[2];
 	
 	//Zeroing out IPserver and Ipclient
 	bzero(&IPclient, sizeof(IPclient));
@@ -309,13 +426,52 @@ int main(int argc, char **argv)
 	
 	//printf("\nReceived from server : %s", recvline);
 	
-	memset(recvline,0,sizeof(recvline));
+	dg_send_recv(sockfd, filename, strlen(filename), recvcontent, sizeof(recvcontent), (const SA *)ipstr, sizeof(ipstr));
 	
-	sprintf(recvline, "%s", "Howdy there");
-	sendto(sockfd, recvline, sizeof(recvline), 0, NULL, 0);
-	recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
-	
-	printf("\nReceived from server : %s", recvline);
+	while(1)
+	{
+			memset(&recvcontent[0],0,sizeof(recvcontent));
+			msgrecv.msg_name = NULL;
+			msgrecv.msg_namelen = 0;
+			msgrecv.msg_iov = iovrecv;
+			msgrecv.msg_iovlen = 2;
+			iovrecv[0].iov_base = &recvhdr;
+			iovrecv[0].iov_len = sizeof(struct hdr);
+			iovrecv[1].iov_base = recvcontent;
+			iovrecv[1].iov_len = sizeof(recvcontent);
+			
+			sendcontent[0] = 'A';
+			sendcontent[1] = 'C';
+			sendcontent[2] = 'K';
+			msgsend.msg_name = NULL;
+			msgsend.msg_namelen = 0;
+			msgsend.msg_iov = iovsend;
+			msgsend.msg_iovlen = 2;
+			
+			n = recvmsg(sockfd, &msgrecv, 0);
+			printf("\n Received from server : %s with sequence number: %d\n",msgrecv.msg_iov[1].iov_base,recvhdr.seq);
+			iovsend[0].iov_base = msgrecv.msg_iov[0].iov_base;
+			iovsend[0].iov_len = sizeof(struct hdr);
+			iovsend[1].iov_base = &sendcontent;
+			iovsend[1].iov_len = sizeof(sendcontent);
+			result = random_gen();
+			//printf("The random number is:%f",result);
+			//result =0.1;
+			if(result > 0.3)
+			{
+				if((x=strcmp(msgrecv.msg_iov[1].iov_base, "\0"))==0)
+				{
+					sendmsg(sockfd, &msgsend ,0);
+					break;
+				}
+				if(sendmsg(sockfd, &msgsend ,0))
+				{
+					//printf("Sending reply to server");
+				}
+				//printf("\n Sent ACK to the server for datagram with sequence number: %d\n",recvhdr.seq);
+			}
+			//result = result + 1;
+	}
 	
 	printf("\nReached the end of client program, exitting\n");
 }

@@ -1,9 +1,12 @@
 #include "unpifiplus.h"
+#include	"unprtt.h"
+#include	<setjmp.h>
+#include	<sys/time.h>
 
 /*
-*
 *  1. Implement timeouts for the send and receive of filename and ephemeral port number
-*  2. Error checking 
+*
+*  2. Error checking (SIGCHLD)
 */
 
 struct socket_info{
@@ -15,6 +18,125 @@ struct socket_info{
  	
 struct socket_info intf_info[32];
 
+/* Structures and variables for timeout mechanism */
+
+static struct rtt_info   rttinfo;
+static int	rttinit = 0;
+static struct msghdr	msgsend, msgrecv;	/* assumed init to 0 */
+static struct hdr {
+  uint32_t	seq;	/* sequence # */
+  uint32_t	ts;		/* timestamp when sent */
+} sendhdr, recvhdr;
+
+static void	sig_alrm(int signo);
+static sigjmp_buf	jmpbuf;
+
+ssize_t
+dg_send_recv(int fd, const void *outbuff, size_t outbytes,
+			 void *inbuff, size_t inbytes,
+			 const SA *destaddr, socklen_t destlen)
+{
+	ssize_t			n;
+	struct iovec	iovsend[2], iovrecv[2];
+	struct itimerval timer, oldtimer;
+	struct timeval tval;
+	int x;
+
+	if (rttinit == 0) {
+		rtt_init(&rttinfo);		/* first time we're called */
+		rttinit = 1;
+		rtt_d_flag = 1;
+	}
+	//printf("\nFinished setting the rtt init");
+	sendhdr.seq++;
+	msgsend.msg_name = NULL;
+	msgsend.msg_namelen = 0;
+	msgsend.msg_iov = iovsend;
+	msgsend.msg_iovlen = 2;
+	iovsend[0].iov_base = &sendhdr;
+	iovsend[0].iov_len = sizeof(struct hdr);
+	iovsend[1].iov_base = outbuff;
+	iovsend[1].iov_len = outbytes;
+
+	msgrecv.msg_name = NULL;
+	msgrecv.msg_namelen = 0;
+	msgrecv.msg_iov = iovrecv;
+	msgrecv.msg_iovlen = 2;
+	iovrecv[0].iov_base = &recvhdr;
+	iovrecv[0].iov_len = sizeof(struct hdr);
+	iovrecv[1].iov_base = inbuff;
+	iovrecv[1].iov_len = inbytes;
+/* end dgsendrecv1 */
+
+/* include dgsendrecv2 */
+	//printf("\ncalling signal");
+	Signal(SIGALRM, sig_alrm);
+	//printf("\ncalling rtt_newpack");
+	rtt_newpack(&rttinfo);		/* initialize for this packet */
+	//printf("\nIn dg_sed_recv function");
+	//printf("The contents are : %s",msgsend.msg_iov[1].iov_base);
+sendagain:
+	sendhdr.ts = rtt_ts(&rttinfo);
+	if(sendmsg(fd, &msgsend, 0))
+	{
+		//printf("\nCalling sendmsg in dg_send_recv");
+	}
+	//printf("The contents are : %s",msgsend.msg_iov[1].iov_base);
+	//alarm(rtt_start(&rttinfo));	/* calc timeout value & start timer */
+	tval.tv_sec = 0;
+	//tval.tv_usec = 0;
+	tval.tv_usec = rtt_start(&rttinfo); /* Converting milliseconds return value of rtt_start to microseconds */
+	timer.it_interval = tval;
+	timer.it_value = tval;
+	if(setitimer(ITIMER_REAL, &timer, &oldtimer) == 0)
+	{
+		//printf("\nTimer started...");
+	} 
+
+	if (sigsetjmp(jmpbuf, 1) != 0) {
+		if (rtt_timeout(&rttinfo) < 0) {
+			err_msg("dg_send_recv: no response from Client, giving up");
+			rttinit = 0;	/* reinit in case we're called again */
+			errno = ETIMEDOUT;
+			return(-1);
+		}
+		goto sendagain;
+	}
+
+	/*do {
+		n = recvmsg(fd, &msgrecv, 0);
+	} while (n < sizeof(struct hdr) || recvhdr.seq != sendhdr.seq);
+	*/
+	if((n = recvmsg(fd, &msgrecv, 0))>0)
+	{
+		printf("\nThe server received : %s with sequence number:%d\n", msgrecv.msg_iov[1].iov_base,recvhdr.seq); 
+	}
+	else
+	{
+		printf("The recvmsg is failed in dg_send_recv");
+	}
+	msgrecv.msg_iov = NULL;
+	//alarm(0);			/* stop SIGALRM timer */
+	tval.tv_sec = 0;
+	tval.tv_usec = 0;
+	timer.it_interval = tval;
+	timer.it_value = tval;
+	if(setitimer(ITIMER_REAL, &timer, &oldtimer) == 0)
+	{
+		//printf("\nTimer stopped...");
+	} 
+		/* 4calculate & store new RTT estimator values */
+	rtt_stop(&rttinfo, rtt_ts(&rttinfo) - recvhdr.ts);
+
+	return(n - sizeof(struct hdr));	/* return size of received datagram */
+}
+
+static void
+sig_alrm(int signo)
+{
+	siglongjmp(jmpbuf, 1);
+}
+
 void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, socklen_t clilen, int noofintf, char filename)
 {
 	pid_t mypid;
@@ -23,13 +145,16 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	
 	int n, i = 0, setflag = 0;
 	int connfd;
-	char mesg[MAXLINE];
+	int counter=1,lc=0;
+	FILE *fd;
+	char mesg[MAXLINE], filecontent[MAXLINE], sendbuf[MAXLINE], recvbuf[MAXLINE+1];
 	char str[INET_ADDRSTRLEN];
 	const int on = 1;
 	struct sockaddr_in IPserver, IPclient;
 	struct sockaddr_in temp;
 	socklen_t len;
 	int sa_len = sizeof(IPserver);
+	struct iovec	iovrecv[2], iovsend[2];
 	
 	//Variables for getpeername stuff
 	socklen_t slen;
@@ -37,6 +162,8 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	char ipstr[INET6_ADDRSTRLEN];
 	int port;	
 	slen = sizeof(temp_storage);
+	
+	struct node *datalist;
 	
 	//Code to close all the sockets except Listening socket
 	printf("\nServer Child %d: Closing all sockets except Listening socket: %d\n", mypid, this_socket.sockfd);
@@ -119,33 +246,72 @@ void ftp_server(struct socket_info this_socket, struct sockaddr *pcliaddr, sockl
 	
 	//Sending the new ephemeral port number to client
 	sprintf(mesg, "%d", IPserver.sin_port);
-	printf("\n%s\n", mesg);
 	sendto(this_socket.sockfd, mesg, sizeof(mesg), 0, pcliaddr, len);
 	close(this_socket.sockfd);
 	
 	
-	//***Start of Part 2 code******************************************************************************************
-		
-	//sendto(connfd, mesg, n, 0, NULL, 0);
-	//@Chaitanya This is some sample code, that just echoes the file name
-	//@Chaitanya connfd is the final connected socket
-	
-	//n = recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
-	//sendto(connfd, mesg, n, 0, NULL, 0);	
+	//***Start of Part 2 code**************************************************************************************	
 	//*************************************************************************************************************
 	
+	msgrecv.msg_name = NULL;
+	msgrecv.msg_namelen = 0;
+	msgrecv.msg_iov = iovrecv;
+	msgrecv.msg_iovlen = 2;
+	iovrecv[0].iov_base = &recvhdr;
+	iovrecv[0].iov_len = sizeof(struct hdr);
+	iovrecv[1].iov_base = recvbuf;
+	iovrecv[1].iov_len = sizeof(recvbuf);
 	
-	recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
-	sendto(connfd, mesg, sizeof(mesg), 0, NULL, 0);
+	sendbuf[0] = 'A';
+	sendbuf[1] = 'C';
+	sendbuf[2] = 'K';
+	msgsend.msg_name = NULL;
+	msgsend.msg_namelen = 0;
+	msgsend.msg_iov = iovsend;
+	msgsend.msg_iovlen = 2;
+	iovsend[1].iov_base = sendbuf;
+	iovsend[1].iov_len = sizeof(sendbuf);
+	if((n = recvmsg(connfd, &msgrecv, 0))>0)
+	{
+		printf("\nThe Filename received by server is: %s with sequence number:%d\n", msgrecv.msg_iov[1].iov_base,recvhdr.seq); 
+		iovsend[0].iov_base = msgrecv.msg_iov[0].iov_base;
+		iovsend[0].iov_len = sizeof(struct hdr);
+		if(sendmsg(connfd, &msgsend, 0))
+		{
+			printf("\nACK sent for filename");
+		}
+	}
+	else
+	{
+		printf("The recvmsg failed while receiving filename from client");
+	}
+	fd = fopen(msgrecv.msg_iov[1].iov_base, "r");
+	
+	if(fd == NULL)
+	{
+		printf("File open error for: %s file", mesg);
+	}
+	else
+	{
+		while(fgets(filecontent, 20, fd)!= NULL)
+		{
+			//printf("\ncalling dg send recv");
+			if(lc == 1)
+			{
+				datalist = makelist(1);
+			}
+			while(lc > 0)
+			{
+				
+			}
+			dg_send_recv(connfd, filecontent, sizeof(filecontent), recvbuf, MAXLINE, (const SA *)ipstr, sizeof(ipstr));  
+			memset(&filecontent[0],0,sizeof(filecontent));
+		}
+		dg_send_recv(connfd, "\0", 1, recvbuf, MAXLINE, (const SA *)ipstr, sizeof(ipstr));
+		fclose(fd);			
+	}	
 	
 	//***End of Part 2 code****************************************************************************************
-		
-	//sendto(connfd, mesg, n, 0, NULL, 0);
-	//@Chaitanya This is some sample code, that just echoes the file name
-	//@Chaitanya connfd is the final connected socket
-	
-	//n = recvfrom(connfd, mesg, MAXLINE, 0, NULL, NULL);
-	//sendto(connfd, mesg, n, 0, NULL, 0);	
 	//*************************************************************************************************************
 	
 	printf("\nReached the end of the server child code\n");
@@ -263,8 +429,7 @@ int main(int argc, char **argv)
 		
 		if(result == -1)
 		{
-			printf("\nServer Parent: ERROR :Something wrong with select. Resetting \n");
-			perror("Select error");
+			perror("\nServer Parent: ERROR :Something wrong with select. Resetting\n");
 			exit(0);
 		}
 		
